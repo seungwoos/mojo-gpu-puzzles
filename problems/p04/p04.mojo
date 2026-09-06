@@ -1,11 +1,18 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.memory import UnsafePointer
-from std.gpu import thread_idx
-from std.gpu.host import DeviceContext
+from std.memory import Pointer
+from max.gpu import thread_idx
+from max.gpu.host import DeviceContext
 from std.testing import assert_equal
 
 # ANCHOR: add_10_2d
@@ -16,10 +23,11 @@ comptime dtype = DType.float32
 
 
 def add_10_2d(
-    output: UnsafePointer[Scalar[dtype], MutAnyOrigin],
-    a: UnsafePointer[Scalar[dtype], MutAnyOrigin],
-    size: Int,
+    output: Pointer[Scalar[dtype], MutAnyOrigin],
+    a: Pointer[Scalar[dtype], MutAnyOrigin],
+    size_dev: Int32,
 ):
+    var size = Int(size_dev)
     var row = thread_idx.y
     var col = thread_idx.x
     if row < size and col < size:
@@ -39,15 +47,15 @@ def main() raises:
         a.enqueue_fill(0)
         with a.map_to_host() as a_host:
             # row-major
-            for i in range(SIZE):
-                for j in range(SIZE):
-                    a_host[i * SIZE + j] = Scalar[dtype](i * SIZE + j)
-                    expected[i * SIZE + j] = a_host[i * SIZE + j] + 10
+            for y in range(SIZE):
+                for x in range(SIZE):
+                    a_host[y * SIZE + x] = Scalar[dtype](y * SIZE + x)
+                    expected[y * SIZE + x] = a_host[y * SIZE + x] + 10
 
         ctx.enqueue_function[add_10_2d](
             out,
             a,
-            SIZE,
+            Int32(SIZE),
             grid_dim=BLOCKS_PER_GRID,
             block_dim=THREADS_PER_BLOCK,
         )
@@ -57,7 +65,7 @@ def main() raises:
         with out.map_to_host() as out_host:
             print("out:", out_host)
             print("expected:", expected)
-            for i in range(SIZE):
-                for j in range(SIZE):
-                    assert_equal(out_host[i * SIZE + j], expected[i * SIZE + j])
+            for y in range(SIZE):
+                for x in range(SIZE):
+                    assert_equal(out_host[y * SIZE + x], expected[y * SIZE + x])
             print("Puzzle 04 complete ✅")

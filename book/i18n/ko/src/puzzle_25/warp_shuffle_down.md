@@ -1,4 +1,4 @@
-<!-- i18n-source-commit: 477e5a0d3eed091b3dde0812977773f7dc97730a -->
+<!-- i18n-source-commit: 19dfa37b22cd58ed566fcd5cb2f52ec00e453202 -->
 
 # `warp.shuffle_down()` 일대일 통신
 
@@ -8,7 +8,7 @@
 있습니다.
 
 **핵심 통찰:**
-_[shuffle_down()](https://docs.modular.com/mojo/std/gpu/primitives/warp/shuffle_down)
+_[shuffle_down()](https://docs.modular.com/api/mojo/max/gpu/primitives/warp/shuffle_down)
 연산은 SIMT 실행을 활용하여 각 레인이 같은 워프 내 이웃의 데이터에 접근할 수
 있게 하며, 효율적인 스텐실 패턴과 슬라이딩 윈도우 연산을 가능하게 합니다._
 

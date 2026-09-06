@@ -1,4 +1,4 @@
-<!-- i18n-source-commit: 477e5a0d3eed091b3dde0812977773f7dc97730a -->
+<!-- i18n-source-commit: 19dfa37b22cd58ed566fcd5cb2f52ec00e453202 -->
 
 # `warp.broadcast()` 일대다 통신
 
@@ -8,7 +8,7 @@
 효율적으로 수행할 수 있습니다.
 
 **핵심 통찰:**
-_[broadcast()](https://docs.modular.com/mojo/std/gpu/primitives/warp/broadcast)
+_[broadcast()](https://docs.modular.com/api/mojo/max/gpu/primitives/warp/broadcast)
 연산은 SIMT 실행을 활용하여 하나의 레인(보통 레인 0)이 계산한 값을 같은 워프의
 모든 레인에 전달하며, 효율적인 조정 패턴과 집합적 의사결정을 가능하게 합니다._
 

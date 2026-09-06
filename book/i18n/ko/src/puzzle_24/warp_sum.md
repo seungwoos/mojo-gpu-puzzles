@@ -1,4 +1,4 @@
-<!-- i18n-source-commit: 477e5a0d3eed091b3dde0812977773f7dc97730a -->
+<!-- i18n-source-commit: 19dfa37b22cd58ed566fcd5cb2f52ec00e453202 -->
 
 # warp.sum()의 핵심 - 워프 레벨 내적
 
@@ -8,7 +8,7 @@
 프로그래밍이 GPU 동기화를 어떻게 변환하는지 보여줍니다.
 
 **핵심 통찰:**
-_[warp.sum()](https://docs.modular.com/mojo/std/gpu/primitives/warp/sum) 연산은
+_[warp.sum()](https://docs.modular.com/api/mojo/max/gpu/primitives/warp/sum) 연산은
 SIMT 실행을 활용하여 공유 메모리 + 배리어 + 트리 리덕션을 단일 하드웨어 가속
 명령으로 대체합니다._
 
@@ -275,7 +275,7 @@ warp_sum() 하드웨어 연산:
 `compute_dot_product` 함수를 **10줄 이내**로 완성해야 합니다:
 
 ```mojo
-@parameter
+@__parameter
 @always_inline
 def compute_dot_product[simd_width: Int, rank: Int](indices: IndexList[rank]) capturing -> None:
     idx = indices[0]
@@ -324,8 +324,8 @@ if lane_id() == 0:
 ### 4. **import에서 사용 가능한 함수들**
 
 ```mojo
-from gpu import lane_id
-from gpu.primitives.warp import sum as warp_sum, WARP_SIZE
+from max.gpu import lane_id
+from max.gpu.primitives.warp import sum as warp_sum, WARP_SIZE
 
 # 함수 내에서:
 my_lane = lane_id()           # 0 ~ WARP_SIZE-1

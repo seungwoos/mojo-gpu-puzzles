@@ -1,18 +1,22 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.testing import assert_equal
-from std.gpu.host import DeviceContext
-
-# ANCHOR: axis_sum
-from std.gpu import thread_idx, block_idx, block_dim, barrier
-from std.gpu.memory import AddressSpace
+from max.gpu import thread_idx, block_idx, block_dim
+from max.gpu.sync import barrier
+from max.gpu.host import DeviceContext
 from layout import TileTensor
 from layout.tile_layout import row_major
 from layout.tile_tensor import stack_allocation
-
+from std.testing import assert_equal
 
 comptime TPB = 8
 comptime BATCH = 4
@@ -21,16 +25,18 @@ comptime BLOCKS_PER_GRID = (1, BATCH)
 comptime THREADS_PER_BLOCK = (TPB, 1)
 comptime dtype = DType.float32
 comptime in_layout = row_major[BATCH, SIZE]()
-comptime InLayout = type_of(in_layout)
 comptime out_layout = row_major[BATCH, 1]()
+comptime InLayout = type_of(in_layout)
 comptime OutLayout = type_of(out_layout)
 
 
+# ANCHOR: axis_sum
 def axis_sum(
     output: TileTensor[mut=True, dtype, OutLayout, MutAnyOrigin],
     a: TileTensor[mut=False, dtype, InLayout, ImmutAnyOrigin],
-    size: Int,
+    size_dev: Int32,
 ):
+    var size = Int(size_dev)
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     var local_i = thread_idx.x
     var batch = block_idx.y
@@ -57,7 +63,7 @@ def main() raises:
         ctx.enqueue_function[axis_sum](
             out_tensor,
             inp_tensor,
-            SIZE,
+            Int32(SIZE),
             grid_dim=BLOCKS_PER_GRID,
             block_dim=THREADS_PER_BLOCK,
         )
@@ -72,7 +78,7 @@ def main() raises:
         ctx.synchronize()
 
         with out.map_to_host() as out_host:
-            print("out:", out)
+            print("out:", out_host)
             print("expected:", expected)
             for i in range(BATCH):
                 assert_equal(out_host[i], expected[i])

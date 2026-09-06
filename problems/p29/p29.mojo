@@ -1,27 +1,29 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.gpu import thread_idx, block_idx, block_dim, barrier
-from std.gpu.sync import (
+from max.gpu import thread_idx, block_idx, block_dim
+from max.gpu.sync import barrier
+from max.gpu.sync import (
     mbarrier_init,
     mbarrier_arrive,
     mbarrier_test_wait,
-    async_copy_arrive,
-    cp_async_bulk_commit_group,
-    cp_async_bulk_wait_group,
 )
-from std.gpu.host import DeviceContext
-from std.gpu.memory import AddressSpace, async_copy_wait_all
+from max.gpu.host import DeviceContext
 from layout import TileTensor
 from layout.tile_layout import row_major
 from layout.tile_tensor import stack_allocation
 from layout.layout_tensor import copy_dram_to_sram_async
 from std.sys import argv, info
 from std.testing import assert_true, assert_almost_equal
-
-# ANCHOR: multi_stage_pipeline
 
 comptime TPB = 256  # Threads per block for pipeline stages
 comptime SIZE = 1024  # Image size (1D for simplicity)
@@ -37,10 +39,11 @@ comptime STAGE2_THREADS = TPB // 2
 comptime BLUR_RADIUS = 2
 
 
+# ANCHOR: multi_stage_pipeline
 def multi_stage_image_blur_pipeline(
     output: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
-    input: TileTensor[mut=False, dtype, LayoutType, ImmutAnyOrigin],
-    size: Int,
+    input: TileTensor[mut=False, dtype, LayoutType, MutAnyOrigin],
+    size_dev: Int32,
 ):
     """Multi-stage image blur pipeline with barrier coordination.
 
@@ -50,13 +53,14 @@ def multi_stage_image_blur_pipeline(
     """
 
     # Shared memory buffers for pipeline stages
-    var input_shared = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB]())
-    var blur_shared = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB]())
+    var input_shared = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB]()
+    )
+    var blur_shared = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB]()
+    )
 
+    var size = Int(size_dev)
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     var local_i = thread_idx.x
 
@@ -81,17 +85,17 @@ def multi_stage_image_blur_pipeline(
 
 # ANCHOR_END: multi_stage_pipeline
 
-# ANCHOR: double_buffered_stencil
 
 # Double-buffered stencil configuration
 comptime STENCIL_ITERATIONS = 3
 comptime BUFFER_COUNT = 2
 
 
+# ANCHOR: double_buffered_stencil
 def double_buffered_stencil_computation(
     output: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
-    input: TileTensor[mut=False, dtype, LayoutType, ImmutAnyOrigin],
-    size: Int,
+    input: TileTensor[mut=False, dtype, LayoutType, MutAnyOrigin],
+    size_dev: Int32,
 ):
     """Double-buffered stencil computation with memory barrier coordination.
 
@@ -100,24 +104,25 @@ def double_buffered_stencil_computation(
     """
 
     # Double-buffering: Two shared memory buffers
-    var buffer_A = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB]())
-    var buffer_B = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB]())
+    var buffer_A = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB]()
+    )
+    var buffer_B = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB]()
+    )
 
     # Memory barriers for coordinating buffer swaps
     var init_barrier = stack_allocation[
-        dtype=DType.uint64, address_space=AddressSpace.SHARED
+        dtype=DType.uint64, address_space=.SHARED
     ](row_major[1]())
     var iter_barrier = stack_allocation[
-        dtype=DType.uint64, address_space=AddressSpace.SHARED
+        dtype=DType.uint64, address_space=.SHARED
     ](row_major[1]())
     var final_barrier = stack_allocation[
-        dtype=DType.uint64, address_space=AddressSpace.SHARED
+        dtype=DType.uint64, address_space=.SHARED
     ](row_major[1]())
 
+    var size = Int(size_dev)
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     var local_i = thread_idx.x
 
@@ -135,8 +140,8 @@ def double_buffered_stencil_computation(
 
     # FILL ME IN (roughly 4 lines)
 
-    # Wait for buffer_A initialization. mbarrier_test_wait is non-blocking, so
-    # spin until it reports completion.
+    # Wait for buffer_A initialization. mbarrier_test_wait is a non-blocking
+    # poll, so spin until it reports completion.
     _ = mbarrier_arrive(init_barrier.ptr)
     while not mbarrier_test_wait(init_barrier.ptr, TPB):
         pass
@@ -202,16 +207,14 @@ def test_multi_stage_pipeline() raises:
                 inp_host[i] = Scalar[dtype](i % 10) + Scalar[dtype](i) / 100.0
 
         # Create TileTensors
-        var out_tensor = TileTensor(out, layout)
-        var inp_tensor = TileTensor[
-            mut=False, dtype, LayoutType, ImmutAnyOrigin
-        ](inp, layout)
+        var out_tensor = TileTensor[mut=True, dtype, LayoutType](out, layout)
+        var inp_tensor = TileTensor[mut=False, dtype, LayoutType](inp, layout)
 
         comptime kernel = multi_stage_image_blur_pipeline
         ctx.enqueue_function[kernel](
             out_tensor,
             inp_tensor,
-            SIZE,
+            Int32(SIZE),
             grid_dim=BLOCKS_PER_GRID,
             block_dim=THREADS_PER_BLOCK,
         )
@@ -266,16 +269,14 @@ def test_double_buffered_stencil() raises:
                 inp_host[i] = Scalar[dtype](1.0 if i % 20 < 10 else 0.0)
 
         # Create TileTensors for Puzzle 29B
-        var out_tensor = TileTensor(out, layout)
-        var inp_tensor = TileTensor[
-            mut=False, dtype, LayoutType, ImmutAnyOrigin
-        ](inp, layout)
+        var out_tensor = TileTensor[mut=True, dtype, LayoutType](out, layout)
+        var inp_tensor = TileTensor[mut=False, dtype, LayoutType](inp, layout)
 
         comptime kernel = double_buffered_stencil_computation
         ctx.enqueue_function[kernel](
             out_tensor,
             inp_tensor,
-            SIZE,
+            Int32(SIZE),
             grid_dim=BLOCKS_PER_GRID,
             block_dim=THREADS_PER_BLOCK,
         )
@@ -336,7 +337,7 @@ def main() raises:
 
     # Parse command line arguments
     if len(argv()) != 2:
-        print("Usage: p26.mojo [--multi-stage | --double-buffer]")
+        print("Usage: p29.mojo [--multi-stage | --double-buffer]")
         print("  --multi-stage: Test multi-stage pipeline coordination")
         print("  --double-buffer: Test double-buffered stencil computation")
         return
@@ -361,4 +362,4 @@ def main() raises:
         print("=" * 60)
         test_double_buffered_stencil()
     else:
-        print("Usage: p26.mojo [--multi-stage | --double-buffer]")
+        print("Usage: p29.mojo [--multi-stage | --double-buffer]")

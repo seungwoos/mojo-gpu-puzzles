@@ -1,4 +1,4 @@
-<!-- i18n-source-commit: 477e5a0d3eed091b3dde0812977773f7dc97730a -->
+<!-- i18n-source-commit: 19dfa37b22cd58ed566fcd5cb2f52ec00e453202 -->
 
 # `warp.prefix_sum()` 하드웨어 최적화 병렬 스캔
 
@@ -8,7 +8,7 @@
 파티셔닝, 고급 조정 알고리즘을 구현할 수 있습니다.
 
 **핵심 통찰:**
-_[prefix_sum()](https://docs.modular.com/mojo/std/gpu/primitives/warp/prefix_sum)
+_[prefix_sum()](https://docs.modular.com/api/mojo/max/gpu/primitives/warp/prefix_sum)
 연산은 하드웨어 가속 병렬 스캔을 활용하여 워프 레인에 걸쳐 \\(O(\\log n)\\)
 복잡도로 누적 연산을 수행하며, 복잡한 다단계 알고리즘을 단일 함수 호출로
 대체합니다._
@@ -422,7 +422,7 @@ if global_i < size:
     # 워프 전체의 합산을 위한 버터플라이 리덕션: 모든 WARP_SIZE에 동적 대응
     offset = WARP_SIZE // 2
     while offset > 0:
-        warp_left_total += shuffle_xor(warp_left_total, offset)
+        warp_left_total += shuffle_xor(warp_left_total, UInt32(offset))
         offset //= 2
 
     # 4단계: 출력 위치에 기록

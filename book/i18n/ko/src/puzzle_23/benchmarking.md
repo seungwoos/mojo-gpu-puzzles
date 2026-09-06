@@ -1,4 +1,4 @@
-<!-- i18n-source-commit: 477e5a0d3eed091b3dde0812977773f7dc97730a -->
+<!-- i18n-source-commit: 11c7cd4d3a6dbdd0f7cf9e84c0e4d9c148984c78 -->
 
 # 📊 Mojo 벤치마킹 - 성능 분석과 최적화
 
@@ -103,13 +103,13 @@ Benchmarks completed!
 벤치마킹 시스템은 Mojo의 내장 `benchmark` 모듈을 사용합니다:
 
 ```mojo
-from benchmark import Bench, BenchConfig, Bencher, BenchId, keep
+from std.benchmark import Bench, BenchConfig, Bencher, BenchId, keep
 bench_config = BenchConfig(max_iters=10, num_warmup_iters=1)
 ```
 
 - **`max_iters=10`**: 통계적 신뢰성을 위해 최대 10회 반복
 - **`num_warmup_iters=1`**: 측정 전 GPU 워밍업
-- [Benchmark 문서](https://docs.modular.com/mojo/std/benchmark/)를 참고하세요
+- [Benchmark 문서](https://mojolang.org/docs/std/benchmark/)를 참고하세요
 
 ## 벤치마킹 구현의 핵심
 
@@ -118,11 +118,11 @@ bench_config = BenchConfig(max_iters=10, num_warmup_iters=1)
 각 벤치마크는 다음과 같은 간결한 패턴을 따릅니다:
 
 ```mojo
-@parameter
+@__parameter
 def benchmark_pattern_parameterized[test_size: Int, tile_size: Int](mut b: Bencher) raises:
     bench_ctx = DeviceContext()
     # 셋업: 버퍼 생성 및 데이터 초기화
-    @parameter
+    @__parameter
     def pattern_workflow(ctx: DeviceContext) raises:
       # 연산: 측정 대상 알고리즘 실행
 

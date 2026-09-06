@@ -1,22 +1,33 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.gpu import thread_idx, block_dim, block_idx, barrier
-from std.gpu.host import DeviceContext
-from std.gpu.host.compile import get_gpu_target
-from layout import TileTensor
+from max.gpu import thread_idx, block_dim, block_idx
+from max.gpu.sync import barrier
+from max.gpu.host import DeviceContext
+from max.gpu.host.compile import get_gpu_target
+from layout import TileTensor, LayoutTensor
 from layout.tile_layout import row_major, TensorLayout
 from layout.tile_tensor import stack_allocation
-from std.utils import IndexList
+from std.utils import Index
+from std.utils.coord import Coord
 from std.math import log2
-from std.algorithm.functional import elementwise, vectorize
+from std.algorithm.functional import vectorize
+
+from max.algorithm.functional import elementwise
 from std.sys import simd_width_of, argv, align_of
 from std.testing import assert_equal
 from std.benchmark import Bench, BenchConfig, Bencher, BenchId, keep
+from max.benchmark import bencher_iter_custom
 
-# ANCHOR: elementwise_add
 comptime SIZE = 1024
 comptime rank = 1
 comptime layout = row_major[SIZE]()
@@ -25,6 +36,7 @@ comptime dtype = DType.float32
 comptime SIMD_WIDTH = simd_width_of[dtype, target=get_gpu_target()]()
 
 
+# ANCHOR: elementwise_add
 def elementwise_add[
     LayoutT: TensorLayout, dtype: DType, simd_width: Int, rank: Int, size: Int
 ](
@@ -33,16 +45,12 @@ def elementwise_add[
     b: TileTensor[mut=False, dtype, LayoutT, MutAnyOrigin],
     ctx: DeviceContext,
 ) raises:
-    @parameter
     @always_inline
-    def add[
-        simd_width: Int, rank: Int, alignment: Int = align_of[dtype]()
-    ](indices: IndexList[rank]) capturing -> None:
-        var idx = indices[0]
-        print("idx:", idx)
+    def add[simd_width: Int, alignment: Int = 1](indices: Coord) {var} -> None:
+        var idx = Int(indices[0].value())
         # FILL IN (2 to 4 lines)
 
-    elementwise[add, SIMD_WIDTH, target="gpu"](size, ctx)
+    elementwise[simd_width=SIMD_WIDTH, target="gpu"](add, Coord(size), ctx)
 
 
 # ANCHOR_END: elementwise_add
@@ -65,21 +73,22 @@ def tiled_elementwise_add[
     b: TileTensor[mut=False, dtype, LayoutT, MutAnyOrigin],
     ctx: DeviceContext,
 ) raises:
-    @parameter
     @always_inline
     def process_tiles[
-        simd_width: Int, rank: Int, alignment: Int = align_of[dtype]()
-    ](indices: IndexList[rank]) capturing -> None:
-        var tile_id = indices[0]
-        print("tile_id:", tile_id)
-        var output_tile = output.tile[tile_size](tile_id)
-        var a_tile = a.tile[tile_size](tile_id)
-        var b_tile = b.tile[tile_size](tile_id)
+        simd_width: Int, alignment: Int = 1
+    ](indices: Coord) {var} -> None:
+        var tile_id = Int(indices[0].value())
+
+        var output_tile = output.tile[tile_size](tile_id).to_layout_tensor()
+        var a_tile = a.tile[tile_size](tile_id).to_layout_tensor()
+        var b_tile = b.tile[tile_size](tile_id).to_layout_tensor()
 
         # FILL IN (6 lines at most)
 
     var num_tiles = (size + tile_size - 1) // tile_size
-    elementwise[process_tiles, 1, target="gpu"](num_tiles, ctx)
+    elementwise[simd_width=1, target="gpu"](
+        process_tiles, Coord(num_tiles), ctx
+    )
 
 
 # ANCHOR_END: tiled_elementwise_add
@@ -103,24 +112,23 @@ def manual_vectorized_tiled_elementwise_add[
     # Each tile contains tile_size groups of simd_width elements
     comptime chunk_size = tile_size * simd_width
 
-    @parameter
     @always_inline
     def process_manual_vectorized_tiles[
-        num_threads_per_tile: Int, rank: Int, alignment: Int = align_of[dtype]()
-    ](indices: IndexList[rank]) capturing -> None:
-        var tile_id = indices[0]
-        print("tile_id:", tile_id)
-        var output_tile = output.tile[chunk_size](tile_id)
-        var a_tile = a.tile[chunk_size](tile_id)
-        var b_tile = b.tile[chunk_size](tile_id)
+        num_threads_per_tile: Int, alignment: Int = 1
+    ](indices: Coord) {var} -> None:
+        var tile_id = Int(indices[0].value())
+        # Convert inside GPU kernel to avoid host-captured LayoutTensor issues
+        var a_lt = a.to_layout_tensor()
+        var b_lt = b.to_layout_tensor()
+        var out_lt = output.to_layout_tensor()
 
         # FILL IN (7 lines at most)
 
     # Number of tiles needed: each tile processes chunk_size elements
     var num_tiles = (size + chunk_size - 1) // chunk_size
-    elementwise[
-        process_manual_vectorized_tiles, num_threads_per_tile, target="gpu"
-    ](num_tiles, ctx)
+    elementwise[simd_width=num_threads_per_tile, target="gpu"](
+        process_manual_vectorized_tiles, Coord(num_tiles), ctx
+    )
 
 
 # ANCHOR_END: manual_vectorized_tiled_elementwise_add
@@ -142,38 +150,30 @@ def vectorize_within_tiles_elementwise_add[
     ctx: DeviceContext,
 ) raises:
     # Each tile contains tile_size elements (not SIMD groups)
-    @parameter
     @always_inline
     def process_tile_with_vectorize[
-        num_threads_per_tile: Int, rank: Int, alignment: Int = align_of[dtype]()
-    ](indices: IndexList[rank]) capturing -> None:
-        var tile_id = indices[0]
+        num_threads_per_tile: Int, alignment: Int = 1
+    ](indices: Coord) {var} -> None:
+        var tile_id = Int(indices[0].value())
         var tile_start = tile_id * tile_size
         var tile_end = min(tile_start + tile_size, size)
         var actual_tile_size = tile_end - tile_start
-        print(
-            "tile_id:",
-            tile_id,
-            "tile_start:",
-            tile_start,
-            "tile_end:",
-            tile_end,
-            "actual_tile_size:",
-            actual_tile_size,
-        )
+        # Convert inside GPU kernel to avoid host-captured LayoutTensor issues
+        var a_lt = a.to_layout_tensor()
+        var b_lt = b.to_layout_tensor()
+        var out_lt = output.to_layout_tensor()
 
         # FILL IN (9 lines at most)
 
     var num_tiles = (size + tile_size - 1) // tile_size
-    elementwise[
-        process_tile_with_vectorize, num_threads_per_tile, target="gpu"
-    ](num_tiles, ctx)
+    elementwise[simd_width=num_threads_per_tile, target="gpu"](
+        process_tile_with_vectorize, Coord(num_tiles), ctx
+    )
 
 
 # ANCHOR_END: vectorize_within_tiles_elementwise_add
 
 
-@parameter
 @always_inline
 def benchmark_elementwise_parameterized[
     test_size: Int, tile_size: Int
@@ -203,19 +203,17 @@ def benchmark_elementwise_parameterized[
         out, bench_layout
     )
 
-    @parameter
     @always_inline
-    def elementwise_workflow(ctx: DeviceContext) raises:
+    def elementwise_workflow(ctx: DeviceContext) raises {imm}:
         elementwise_add[BenchLayoutType, dtype, SIMD_WIDTH, rank, test_size](
             out_tensor, a_tensor, b_tensor, ctx
         )
 
-    b.iter_custom[elementwise_workflow](bench_ctx)
+    bencher_iter_custom(b, elementwise_workflow, bench_ctx)
     keep(out.unsafe_ptr())
     bench_ctx.synchronize()
 
 
-@parameter
 @always_inline
 def benchmark_tiled_parameterized[
     test_size: Int, tile_size: Int
@@ -245,19 +243,17 @@ def benchmark_tiled_parameterized[
         out, bench_layout
     )
 
-    @parameter
     @always_inline
-    def tiled_workflow(ctx: DeviceContext) raises:
+    def tiled_workflow(ctx: DeviceContext) raises {imm}:
         tiled_elementwise_add[
             BenchLayoutType, dtype, SIMD_WIDTH, rank, test_size, tile_size
         ](out_tensor, a_tensor, b_tensor, ctx)
 
-    b.iter_custom[tiled_workflow](bench_ctx)
+    bencher_iter_custom(b, tiled_workflow, bench_ctx)
     keep(out.unsafe_ptr())
     bench_ctx.synchronize()
 
 
-@parameter
 @always_inline
 def benchmark_manual_vectorized_parameterized[
     test_size: Int, tile_size: Int
@@ -287,19 +283,17 @@ def benchmark_manual_vectorized_parameterized[
         out, bench_layout
     )
 
-    @parameter
     @always_inline
-    def manual_vectorized_workflow(ctx: DeviceContext) raises:
+    def manual_vectorized_workflow(ctx: DeviceContext) raises {imm}:
         manual_vectorized_tiled_elementwise_add[
             BenchLayoutType, dtype, SIMD_WIDTH, 1, rank, test_size, tile_size
         ](out_tensor, a_tensor, b_tensor, ctx)
 
-    b.iter_custom[manual_vectorized_workflow](bench_ctx)
+    bencher_iter_custom(b, manual_vectorized_workflow, bench_ctx)
     keep(out.unsafe_ptr())
     bench_ctx.synchronize()
 
 
-@parameter
 @always_inline
 def benchmark_vectorized_parameterized[
     test_size: Int, tile_size: Int
@@ -329,14 +323,13 @@ def benchmark_vectorized_parameterized[
         out, bench_layout
     )
 
-    @parameter
     @always_inline
-    def vectorized_workflow(ctx: DeviceContext) raises:
+    def vectorized_workflow(ctx: DeviceContext) raises {imm}:
         vectorize_within_tiles_elementwise_add[
             BenchLayoutType, dtype, SIMD_WIDTH, 1, rank, test_size, tile_size
         ](out_tensor, a_tensor, b_tensor, ctx)
 
-    b.iter_custom[vectorized_workflow](bench_ctx)
+    bencher_iter_custom(b, vectorized_workflow, bench_ctx)
     keep(out.unsafe_ptr())
     bench_ctx.synchronize()
 
@@ -434,57 +427,95 @@ def main() raises:
             print("Puzzle 23 complete ✅")
 
     elif argv()[1] == "--benchmark":
-        print("Running P21 GPU Benchmarks...")
+        print("Running P23 GPU Benchmarks...")
         print("SIMD width:", SIMD_WIDTH)
         print("-" * 80)
         var bench_config = BenchConfig(max_iters=10, num_warmup_iters=1)
         var bench = Bench(bench_config.copy())
 
         print("Testing SIZE=16, TILE=4")
-        bench.bench_function[benchmark_elementwise_parameterized[16, 4]](
-            BenchId("elementwise_16_4")
+        bench.bench_function(
+            lambda (mut b: Bencher) raises: benchmark_elementwise_parameterized[
+                16, 4
+            ](b),
+            BenchId("elementwise_16_4"),
         )
-        bench.bench_function[benchmark_tiled_parameterized[16, 4]](
-            BenchId("tiled_16_4")
+        bench.bench_function(
+            lambda (mut b: Bencher) raises: benchmark_tiled_parameterized[
+                16, 4
+            ](b),
+            BenchId("tiled_16_4"),
         )
-        bench.bench_function[benchmark_manual_vectorized_parameterized[16, 4]](
-            BenchId("manual_vectorized_16_4")
+        bench.bench_function(
+            lambda (
+                mut b: Bencher
+            ) raises: benchmark_manual_vectorized_parameterized[16, 4](b),
+            BenchId("manual_vectorized_16_4"),
         )
-        bench.bench_function[benchmark_vectorized_parameterized[16, 4]](
-            BenchId("vectorized_16_4")
+        bench.bench_function(
+            lambda (mut b: Bencher) raises: benchmark_vectorized_parameterized[
+                16, 4
+            ](b),
+            BenchId("vectorized_16_4"),
         )
 
         print("-" * 80)
         print("Testing SIZE=128, TILE=16")
-        bench.bench_function[benchmark_elementwise_parameterized[128, 16]](
-            BenchId("elementwise_128_16")
+        bench.bench_function(
+            lambda (mut b: Bencher) raises: benchmark_elementwise_parameterized[
+                128, 16
+            ](b),
+            BenchId("elementwise_128_16"),
         )
-        bench.bench_function[benchmark_tiled_parameterized[128, 16]](
-            BenchId("tiled_128_16")
+        bench.bench_function(
+            lambda (mut b: Bencher) raises: benchmark_tiled_parameterized[
+                128, 16
+            ](b),
+            BenchId("tiled_128_16"),
         )
-        bench.bench_function[
-            benchmark_manual_vectorized_parameterized[128, 16]
-        ](BenchId("manual_vectorized_128_16"))
+        bench.bench_function(
+            lambda (
+                mut b: Bencher
+            ) raises: benchmark_manual_vectorized_parameterized[128, 16](b),
+            BenchId("manual_vectorized_128_16"),
+        )
 
         print("-" * 80)
         print("Testing SIZE=128, TILE=16, Vectorize within tiles")
-        bench.bench_function[benchmark_vectorized_parameterized[128, 16]](
-            BenchId("vectorized_128_16")
+        bench.bench_function(
+            lambda (mut b: Bencher) raises: benchmark_vectorized_parameterized[
+                128, 16
+            ](b),
+            BenchId("vectorized_128_16"),
         )
 
         print("-" * 80)
         print("Testing SIZE=1048576 (1M), TILE=1024")
-        bench.bench_function[
-            benchmark_elementwise_parameterized[1048576, 1024]
-        ](BenchId("elementwise_1M_1024"))
-        bench.bench_function[benchmark_tiled_parameterized[1048576, 1024]](
-            BenchId("tiled_1M_1024")
+        bench.bench_function(
+            lambda (mut b: Bencher) raises: benchmark_elementwise_parameterized[
+                1048576, 1024
+            ](b),
+            BenchId("elementwise_1M_1024"),
         )
-        bench.bench_function[
-            benchmark_manual_vectorized_parameterized[1048576, 1024]
-        ](BenchId("manual_vectorized_1M_1024"))
-        bench.bench_function[benchmark_vectorized_parameterized[1048576, 1024]](
-            BenchId("vectorized_1M_1024")
+        bench.bench_function(
+            lambda (mut b: Bencher) raises: benchmark_tiled_parameterized[
+                1048576, 1024
+            ](b),
+            BenchId("tiled_1M_1024"),
+        )
+        bench.bench_function(
+            lambda (
+                mut b: Bencher
+            ) raises: benchmark_manual_vectorized_parameterized[1048576, 1024](
+                b
+            ),
+            BenchId("manual_vectorized_1M_1024"),
+        )
+        bench.bench_function(
+            lambda (mut b: Bencher) raises: benchmark_vectorized_parameterized[
+                1048576, 1024
+            ](b),
+            BenchId("vectorized_1M_1024"),
         )
 
         print(bench)

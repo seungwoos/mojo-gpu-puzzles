@@ -1,15 +1,15 @@
-<!-- i18n-source-commit: 477e5a0d3eed091b3dde0812977773f7dc97730a -->
+<!-- i18n-source-commit: 19dfa37b22cd58ed566fcd5cb2f52ec00e453202 -->
 
 # block.sum()의 핵심 - 블록 레벨 내적
 
 [Puzzle 12](../puzzle_12/puzzle_12.md)에서 살펴본 내적을 블록 레벨
-[sum](https://docs.modular.com/mojo/std/gpu/primitives/block/sum) 연산으로
+[sum](https://max.modular.com/api/mojo/max/gpu/primitives/block/sum) 연산으로
 구현합니다. 복잡한 공유 메모리 패턴을 간단한 함수 호출로 대체합니다. 블록 내 각
 스레드가 하나의 요소를 처리하고 `block.sum()`으로 결과를 자동으로 합산하여, 블록
 프로그래밍이 전체 스레드 블록에 걸친 GPU 동기화를 어떻게 변환하는지 보여줍니다.
 
 **핵심 통찰:**
-_[block.sum()](https://docs.modular.com/mojo/std/gpu/primitives/block/sum)
+_[block.sum()](https://max.modular.com/api/mojo/max/gpu/primitives/block/sum)
 연산은 블록 전체 실행을 활용하여 공유 메모리 + 배리어 + 트리 리덕션을 블록 내
 모든 스레드에 걸쳐 워프 패턴을 사용하는 정교하게 최적화된 구현으로 대체합니다.
 LLVM 분석은 [기술 분석](#기술-분석-blocksum은-실제로-무엇으로-컴파일될까)을
@@ -42,7 +42,7 @@ LLVM 분석은 [기술 분석](#기술-분석-blocksum은-실제로-무엇으로
 
 ## 기존 방식의 복잡성 (Puzzle 12에서)
 
-[Puzzle 12](../puzzle_12/tile_tensor.md)의 복잡한 방식을 떠올려 봅시다. 공유
+[Puzzle 12](../puzzle_12/puzzle_12.md)의 복잡한 방식을 떠올려 봅시다. 공유
 메모리, 배리어, 트리 리덕션이 필요했습니다:
 
 ```mojo
@@ -196,7 +196,7 @@ Just like warp.sum() but for the entire block
 `TileTensor` 요소에 접근할 때, 인덱싱이 SIMD 값을 반환한다는 점을 기억하세요.
 산술 연산을 위해 스칼라 값을 추출해야 합니다.
 
-### 4. **[block.sum()](https://docs.modular.com/mojo/std/gpu/primitives/block/sum) API 개념**
+### 4. **[block.sum()](https://max.modular.com/api/mojo/max/gpu/primitives/block/sum) API 개념**
 
 함수 시그니처를 살펴보세요 - 다음이 필요합니다:
 
@@ -340,7 +340,7 @@ bar.sync           0;                        // 배리어 동기화
 성능 이점은 명령 수나 마법 같은 하드웨어가 아니라
 **정교하게 최적화된 알고리즘 선택**(버터플라이 > 트리)에서 비롯됩니다. 구현에
 대한 자세한 내용은 Mojo gpu 모듈의
-[block.mojo](https://github.com/modular/modular/blob/main/mojo/stdlib/std/gpu/primitives/block.mojo)를
+[block.mojo](https://github.com/modular/modular/blob/main/max/mojo/max/gpu/primitives/block.mojo)를
 참고하세요.
 
 ## 성능 인사이트

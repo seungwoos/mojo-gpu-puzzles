@@ -1,9 +1,16 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.gpu.host import DeviceContext
+from max.gpu.host import DeviceContext
 from layout import TileTensor
 from layout.tile_layout import row_major
 from std.testing import assert_almost_equal
@@ -21,15 +28,18 @@ comptime dtype = DType.float32
 
 def test_softmax() raises:
     with DeviceContext() as ctx:
-        var out = ctx.enqueue_create_buffer[DType.float32](SIZE)
+        var out = ctx.enqueue_create_buffer[.float32](SIZE)
         out.enqueue_fill(0)
-        var inp = ctx.enqueue_create_buffer[DType.float32](SIZE)
+        var inp = ctx.enqueue_create_buffer[.float32](SIZE)
         inp.enqueue_fill(0)
         # for CPU testing
-        var expected = ctx.enqueue_create_host_buffer[DType.float32](SIZE)
+        var expected = ctx.enqueue_create_host_buffer[.float32](SIZE)
         expected.enqueue_fill(0)
-        var expected_tensor = TileTensor(expected, layout)
-        # Initialize input with more reasonable values
+        var expected_tensor = TileTensor[
+            mut=True, dtype, LayoutType, MutAnyOrigin
+        ](expected, layout)
+
+        # Initialize input and compute expected (CPU) inside map_to_host block
         with inp.map_to_host() as inp_host:
             for i in range(SIZE):
                 inp_host[i] = Scalar[dtype](i)
@@ -38,17 +48,18 @@ def test_softmax() raises:
             for i in range(SIZE):
                 print(inp_host[i], end=" ")
             print()
-            # Create layout tensors for CPU calculation
-            input_host_tensor = TileTensor[mut=False, dtype, LayoutType](
-                inp_host, layout
-            )
+            # Create layout tensor for CPU calculation (must stay inside with block)
+            var input_host_tensor = TileTensor[
+                mut=True, dtype, LayoutType, MutAnyOrigin
+            ](inp_host, layout)
+            # Compute expected results using our CPU kernel while inp_host is valid
+            softmax_cpu_kernel[SIZE, dtype](expected_tensor, input_host_tensor)
 
         # for GPU testing
         var output_tensor = TileTensor(out, layout)
-        var input_tensor = TileTensor[mut=False, dtype, LayoutType](inp, layout)
-
-        # Compute expected results using our CPU kernel
-        softmax_cpu_kernel[SIZE, dtype](expected_tensor, input_host_tensor)
+        var input_tensor = TileTensor[
+            mut=True, dtype, LayoutType, MutAnyOrigin
+        ](inp, layout)
 
         # Run GPU kernel
         comptime kernel = softmax_gpu_kernel[SIZE, dtype]

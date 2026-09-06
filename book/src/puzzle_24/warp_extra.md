@@ -50,12 +50,12 @@
 
 ```mojo
 # Reduction operations
-from gpu.primitives.warp import sum, max
+from max.gpu.primitives.warp import sum, max
 var total = sum(partial_values)
 var maximum = max(partial_values)
 
 # Communication patterns
-from gpu.primitives.warp import shuffle_idx, prefix_sum
+from max.gpu.primitives.warp import shuffle_idx, prefix_sum
 var broadcast = shuffle_idx(my_value, 0)
 var running_sum = prefix_sum(my_value)
 ```
@@ -73,19 +73,43 @@ var value = input[random_indices[global_i]]  # Scattered reads
 
 # Data-dependent work
 if input[global_i] > threshold:
-    result = expensive_computation()  # Causes warp divergence
+    var result = expensive_computation()  # Causes warp divergence
 ```
 
 ## Performance measurement
 
-```bash
-# Always benchmark both approaches
-mojo p22.mojo --benchmark
+Always benchmark both approaches:
 
-# Look for scaling patterns:
-# traditional_1x:  X.XX ms
-# warp_1x:         Y.YY ms  # Should be faster
-# warp_32x:        Z.ZZ ms  # Advantage should increase
+<div class="code-tabs" data-tab-group="package-manager">
+  <div class="tab-buttons">
+    <button class="tab-button">uv</button>
+    <button class="tab-button">pixi</button>
+  </div>
+  <div class="tab-content">
+
+```bash
+uv run poe p24 --benchmark
+```
+
+  </div>
+  <div class="tab-content">
+
+```bash
+pixi run p24 --benchmark
+```
+
+  </div>
+</div>
+
+Then look for scaling patterns across the reported rows:
+
+```text
+traditional_1x:       X.XX ms
+simple_warp_1x:       Y.YY ms  # Should be faster
+functional_warp_1x:   Y.YY ms
+traditional_32x:      A.AA ms
+simple_warp_32x:      Z.ZZ ms  # Advantage should increase
+functional_warp_32x:  Z.ZZ ms
 ```
 
 ## Summary

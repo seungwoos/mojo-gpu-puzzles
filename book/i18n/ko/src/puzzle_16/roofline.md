@@ -72,7 +72,8 @@ Architecture](https://images.nvidia.com/aem-dam/en-zz/Solutions/data-center/nvid
 아래 애니메이션은 이 퍼즐의 구현들이 A100의 루프라인 모델에 어떻게 대응하는지
 보여줍니다:
 
-![루프라인 모델 시각화](/puzzle_16/media/videos/720p30/roofline_model_viz.gif)
+<img src="/puzzle_16/media/roofline-w.png" alt="루프라인 모델 시각화" class="light-mode-img">
+<img src="/puzzle_16/media/roofline-b.png" alt="루프라인 모델 시각화" class="dark-mode-img">
 
 이 시각화는 이 퍼즐에서 거치게 될 최적화 과정을 보여줍니다:
 
@@ -152,7 +153,7 @@ FLOPs}}{32 \text{ bytes}} = 0.375 \text{ FLOP/B}\\]
 **비동기 연산에 대한 참고**: 표준 GPU 메모리 로드(`ld.global`)는 이미
 비동기입니다 — 워프는 로드한 데이터가 실제로 필요해질 때까지 계속 실행됩니다.
 `cp.async`(CUDA)나
-[copy_dram_to_sram_async](https://docs.modular.com/mojo/layout/layout_tensor/copy_dram_to_sram_async/)(Mojo)
+[copy_dram_to_sram_async](https://max.modular.com/api/mojo/layout/layout_tensor/copy_dram_to_sram_async/)(Mojo)
 같은 전용 비동기 복사 명령은 여기서 한 걸음 더 나아가, 전용 복사 엔진을 사용하고
 레지스터를 우회하여 자원 활용을 높입니다. 단순히 동기 연산을 비동기로 바꾸는
 것과는 다릅니다.

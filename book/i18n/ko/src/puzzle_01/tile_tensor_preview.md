@@ -1,4 +1,4 @@
-<!-- i18n-source-commit: f614177b516e68590fa807e66e31c9f20488c7e7 -->
+<!-- i18n-source-commit: 19dfa37b22cd58ed566fcd5cb2f52ec00e453202 -->
 
 ## 왜 TileTensor를 고려해야 할까요?
 
@@ -34,7 +34,7 @@ idx = (batch * padded_height + row) * padded_width + col
 
 ### TileTensor 미리보기
 
-[TileTensor](https://docs.modular.com/mojo/layout/tile_tensor/TileTensor/)를
+[TileTensor](https://max.modular.com/api/mojo/layout/tile_tensor/TileTensor/)를
 사용하면 이런 경우를 훨씬 깔끔하게 처리할 수 있습니다:
 
 ```mojo

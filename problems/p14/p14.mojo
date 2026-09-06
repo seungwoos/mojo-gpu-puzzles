@@ -1,11 +1,18 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.gpu import thread_idx, block_idx, block_dim, barrier
-from std.gpu.host import DeviceContext
-from std.gpu.memory import AddressSpace
+from max.gpu import thread_idx, block_idx, block_dim
+from max.gpu.sync import barrier
+from max.gpu.host import DeviceContext
 from layout import TileTensor
 from layout.tile_layout import row_major
 from layout.tile_tensor import stack_allocation
@@ -26,8 +33,9 @@ comptime LayoutType = type_of(layout)
 def prefix_sum_simple(
     output: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
     a: TileTensor[mut=False, dtype, LayoutType, ImmutAnyOrigin],
-    size: Int,
+    size_dev: Int32,
 ):
+    var size = Int(size_dev)
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     var local_i = thread_idx.x
     # FILL ME IN (roughly 18 lines)
@@ -35,23 +43,25 @@ def prefix_sum_simple(
 
 # ANCHOR_END: prefix_sum_simple
 
-# ANCHOR: prefix_sum_complete
 comptime SIZE_2 = 15
 comptime BLOCKS_PER_GRID_2 = (2, 1)
 comptime THREADS_PER_BLOCK_2 = (TPB, 1)
 comptime EXTENDED_SIZE = SIZE_2 + 2  # up to 2 blocks
 comptime layout_2 = row_major[SIZE_2]()
-comptime Layout2Type = type_of(layout_2)
 comptime extended_layout = row_major[EXTENDED_SIZE]()
-comptime ExtendedLayoutType = type_of(extended_layout)
+comptime Layout2Type = type_of(layout_2)
+comptime ExtendedLayout = type_of(extended_layout)
+
+# ANCHOR: prefix_sum_complete
 
 
 # Kernel 1: Compute local prefix sums and store block sums in out
 def prefix_sum_local_phase(
-    output: TileTensor[mut=True, dtype, ExtendedLayoutType, MutAnyOrigin],
+    output: TileTensor[mut=True, dtype, ExtendedLayout, MutAnyOrigin],
     a: TileTensor[mut=False, dtype, Layout2Type, ImmutAnyOrigin],
-    size: Int,
+    size_dev: Int32,
 ):
+    var size = Int(size_dev)
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     var local_i = thread_idx.x
     # FILL ME IN (roughly 20 lines)
@@ -59,9 +69,10 @@ def prefix_sum_local_phase(
 
 # Kernel 2: Add block sums to their respective blocks
 def prefix_sum_block_sum_phase(
-    output: TileTensor[mut=True, dtype, ExtendedLayoutType, MutAnyOrigin],
-    size: Int,
+    output: TileTensor[mut=True, dtype, ExtendedLayout, MutAnyOrigin],
+    size_dev: Int32,
 ):
+    var size = Int(size_dev)
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     # FILL ME IN (roughly 3 lines)
 
@@ -71,16 +82,7 @@ def prefix_sum_block_sum_phase(
 
 def main() raises:
     with DeviceContext() as ctx:
-        if len(argv()) != 2 or argv()[1] not in [
-            "--simple",
-            "--complete",
-        ]:
-            raise Error(
-                "Expected one command-line argument: '--simple' or '--complete'"
-            )
-
         var use_simple = argv()[1] == "--simple"
-
         var size = SIZE if use_simple else SIZE_2
         var num_blocks = (size + TPB - 1) // TPB
 
@@ -98,13 +100,13 @@ def main() raises:
                 a_host[i] = Scalar[dtype](i)
 
         if use_simple:
-            a_tensor = TileTensor[mut=False, dtype, LayoutType](a, layout)
-            out_tensor = TileTensor(out, layout)
+            var a_tensor = TileTensor[mut=False, dtype, LayoutType](a, layout)
+            var out_tensor = TileTensor(out, layout)
 
             ctx.enqueue_function[prefix_sum_simple](
                 out_tensor,
                 a_tensor,
-                size,
+                Int32(size),
                 grid_dim=BLOCKS_PER_GRID,
                 block_dim=THREADS_PER_BLOCK,
             )
@@ -119,18 +121,15 @@ def main() raises:
             ctx.enqueue_function[prefix_sum_local_phase](
                 out_tensor,
                 a_tensor,
-                size,
+                Int32(size),
                 grid_dim=BLOCKS_PER_GRID_2,
                 block_dim=THREADS_PER_BLOCK_2,
             )
 
-            # Note: kernel2 starts when kernel1 is finished due to Mojo's DeviceContext using a single execution stream
-            # No explicit ctx.synchronize() needed in this case.
-
             # Phase 2: Add block sums
             ctx.enqueue_function[prefix_sum_block_sum_phase](
                 out_tensor,
-                size,
+                Int32(size),
                 grid_dim=BLOCKS_PER_GRID_2,
                 block_dim=THREADS_PER_BLOCK_2,
             )

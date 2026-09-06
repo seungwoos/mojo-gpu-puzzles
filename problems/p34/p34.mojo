@@ -1,18 +1,25 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.gpu import thread_idx, block_idx, block_dim, barrier
-from std.gpu.host import DeviceContext, Dim
-from std.gpu.primitives.cluster import (
+from max.gpu import thread_idx, block_idx, block_dim
+from max.gpu.sync import barrier
+from max.gpu.host import DeviceContext, Dim
+from max.gpu.primitives.cluster import (
     block_rank_in_cluster,
     cluster_sync,
     cluster_arrive,
     cluster_wait,
     elect_one_sync,
 )
-from std.gpu.memory import AddressSpace
 from layout import TileTensor
 from layout.tile_layout import row_major
 from layout.tile_tensor import stack_allocation
@@ -24,22 +31,23 @@ comptime TPB = 256
 comptime CLUSTER_SIZE = 4
 comptime dtype = DType.float32
 comptime in_layout = row_major[SIZE]()
-comptime InLayoutType = type_of(in_layout)
 comptime out_layout = row_major[1]()
-comptime OutLayoutType = type_of(out_layout)
+comptime InLayout = type_of(in_layout)
+comptime OutLayout = type_of(out_layout)
 comptime cluster_layout = row_major[CLUSTER_SIZE]()
-comptime ClusterLayoutType = type_of(cluster_layout)
+comptime ClusterLayout = type_of(cluster_layout)
 
 
 # ANCHOR: cluster_coordination_basics
 def cluster_coordination_basics[
     tpb: Int
 ](
-    output: TileTensor[mut=True, dtype, ClusterLayoutType, MutAnyOrigin],
-    input: TileTensor[mut=False, dtype, InLayoutType, ImmutAnyOrigin],
-    size: Int,
+    output: TileTensor[mut=True, dtype, ClusterLayout, MutAnyOrigin],
+    input: TileTensor[mut=False, dtype, InLayout, MutAnyOrigin],
+    size_dev: Int32,
 ):
     """Real cluster coordination using SM90+ cluster APIs."""
+    var size = Int(size_dev)
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     var local_i = thread_idx.x
 
@@ -47,9 +55,9 @@ def cluster_coordination_basics[
     var my_block_rank = Int(block_rank_in_cluster())
     var block_id = block_idx.x
 
-    var shared_data = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[tpb]())
+    var shared_data = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[tpb]()
+    )
 
     # FIX: Use block_idx.x for data distribution instead of cluster rank
     # Each block should process different portions of the data
@@ -66,8 +74,6 @@ def cluster_coordination_basics[
     barrier()
 
     # Phase 2: Use cluster_arrive() for inter-block coordination
-    # Signal this block has completed processing
-
     # FILL IN 1 line here
 
     # Block-level aggregation (only thread 0)
@@ -76,7 +82,6 @@ def cluster_coordination_basics[
         ...
 
     # Wait for all blocks in cluster to complete
-
     # FILL IN 1 line here
 
 
@@ -87,10 +92,10 @@ def cluster_coordination_basics[
 def cluster_collective_operations[
     tpb: Int
 ](
-    output: TileTensor[mut=True, dtype, OutLayoutType, MutAnyOrigin],
-    input: TileTensor[mut=False, dtype, InLayoutType, ImmutAnyOrigin],
-    temp_storage: TileTensor[mut=True, dtype, ClusterLayoutType, MutAnyOrigin],
-    size: Int,
+    output: TileTensor[mut=True, dtype, OutLayout, MutAnyOrigin],
+    input: TileTensor[mut=False, dtype, InLayout, MutAnyOrigin],
+    temp_storage: TileTensor[mut=True, dtype, ClusterLayout, MutAnyOrigin],
+    size_dev: Int32,
 ):
     """Cluster-wide collective operations using real cluster APIs."""
     var global_i = block_dim.x * block_idx.x + thread_idx.x
@@ -106,12 +111,11 @@ def cluster_collective_operations[
 def advanced_cluster_patterns[
     tpb: Int
 ](
-    output: TileTensor[mut=True, dtype, ClusterLayoutType, MutAnyOrigin],
-    input: TileTensor[mut=False, dtype, InLayoutType, ImmutAnyOrigin],
-    size: Int,
+    output: TileTensor[mut=True, dtype, ClusterLayout, MutAnyOrigin],
+    input: TileTensor[mut=False, dtype, InLayout, MutAnyOrigin],
+    size_dev: Int32,
 ):
-    """Advanced cluster programming using cluster masks and relaxed synchronization.
-    """
+    """Advanced cluster programming with masks and relaxed sync."""
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     var local_i = thread_idx.x
 
@@ -132,25 +136,27 @@ def main() raises:
             print("Testing Multi-Block Coordination")
             print("SIZE:", SIZE, "TPB:", TPB, "CLUSTER_SIZE:", CLUSTER_SIZE)
 
-            input_buf = ctx.enqueue_create_buffer[dtype](SIZE)
+            var input_buf = ctx.enqueue_create_buffer[dtype](SIZE)
             input_buf.enqueue_fill(0)
-            output_buf = ctx.enqueue_create_buffer[dtype](CLUSTER_SIZE)
+            var output_buf = ctx.enqueue_create_buffer[dtype](CLUSTER_SIZE)
             output_buf.enqueue_fill(0)
 
             with input_buf.map_to_host() as input_host:
                 for i in range(SIZE):
                     input_host[i] = Scalar[dtype](i % 10) * 0.1
 
-            input_tensor = TileTensor[
-                mut=False, dtype, InLayoutType, ImmutAnyOrigin
-            ](input_buf, in_layout)
-            output_tensor = TileTensor(output_buf, cluster_layout)
+            var input_tensor = TileTensor[mut=False, dtype, InLayout](
+                input_buf, in_layout
+            )
+            var output_tensor = TileTensor[mut=True, dtype, ClusterLayout](
+                output_buf, cluster_layout
+            )
 
             comptime kernel = cluster_coordination_basics[TPB]
             ctx.enqueue_function[kernel](
                 output_tensor,
                 input_tensor,
-                SIZE,
+                Int32(SIZE),
                 grid_dim=(CLUSTER_SIZE, 1),
                 block_dim=(TPB, 1),
                 cluster_dim=Dim(CLUSTER_SIZE, 1, 1),
@@ -187,9 +193,9 @@ def main() raises:
             print("Testing Cluster-Wide Reduction")
             print("SIZE:", SIZE, "TPB:", TPB, "CLUSTER_SIZE:", CLUSTER_SIZE)
 
-            input_buf = ctx.enqueue_create_buffer[dtype](SIZE)
+            var input_buf = ctx.enqueue_create_buffer[dtype](SIZE)
             input_buf.enqueue_fill(0)
-            output_buf = ctx.enqueue_create_buffer[dtype](1)
+            var output_buf = ctx.enqueue_create_buffer[dtype](1)
             output_buf.enqueue_fill(0)
             var temp_buf = ctx.enqueue_create_buffer[dtype](CLUSTER_SIZE)
             temp_buf.enqueue_fill(0)
@@ -202,18 +208,22 @@ def main() raises:
 
             print("Expected sum:", expected_sum)
 
-            input_tensor = TileTensor[
-                mut=False, dtype, InLayoutType, ImmutAnyOrigin
-            ](input_buf, in_layout)
-            var output_tensor = TileTensor(output_buf, out_layout)
-            var temp_tensor = TileTensor(temp_buf, cluster_layout)
+            var input_tensor = TileTensor[mut=False, dtype, InLayout](
+                input_buf, in_layout
+            )
+            var output_tensor = TileTensor[mut=True, dtype, OutLayout](
+                output_buf, out_layout
+            )
+            var temp_tensor = TileTensor[mut=True, dtype, ClusterLayout](
+                temp_buf, cluster_layout
+            )
 
             comptime kernel = cluster_collective_operations[TPB]
             ctx.enqueue_function[kernel](
                 output_tensor,
                 input_tensor,
                 temp_tensor,
-                SIZE,
+                Int32(SIZE),
                 grid_dim=(CLUSTER_SIZE, 1),
                 block_dim=(TPB, 1),
                 cluster_dim=Dim(CLUSTER_SIZE, 1, 1),
@@ -222,7 +232,7 @@ def main() raises:
             ctx.synchronize()
 
             with output_buf.map_to_host() as result_host:
-                result = result_host[0]
+                var result = result_host[0]
                 print("Cluster reduction result:", result)
                 print("Expected:", expected_sum)
                 print("Error:", abs(result - expected_sum))
@@ -238,9 +248,9 @@ def main() raises:
             print("Testing Advanced Cluster Algorithms")
             print("SIZE:", SIZE, "TPB:", TPB, "CLUSTER_SIZE:", CLUSTER_SIZE)
 
-            input_buf = ctx.enqueue_create_buffer[dtype](SIZE)
+            var input_buf = ctx.enqueue_create_buffer[dtype](SIZE)
             input_buf.enqueue_fill(0)
-            output_buf = ctx.enqueue_create_buffer[dtype](CLUSTER_SIZE)
+            var output_buf = ctx.enqueue_create_buffer[dtype](CLUSTER_SIZE)
             output_buf.enqueue_fill(0)
 
             with input_buf.map_to_host() as input_host:
@@ -249,16 +259,18 @@ def main() raises:
                         Scalar[dtype](i % 50) * 0.02
                     )  # Pattern for testing
 
-            input_tensor = TileTensor[
-                mut=False, dtype, InLayoutType, ImmutAnyOrigin
-            ](input_buf, in_layout)
-            output_tensor = TileTensor(output_buf, cluster_layout)
+            var input_tensor = TileTensor[mut=False, dtype, InLayout](
+                input_buf, in_layout
+            )
+            var output_tensor = TileTensor[mut=True, dtype, ClusterLayout](
+                output_buf, cluster_layout
+            )
 
             comptime kernel = advanced_cluster_patterns[TPB]
             ctx.enqueue_function[kernel](
                 output_tensor,
                 input_tensor,
-                SIZE,
+                Int32(SIZE),
                 grid_dim=(CLUSTER_SIZE, 1),
                 block_dim=(TPB, 1),
                 cluster_dim=Dim(CLUSTER_SIZE, 1, 1),

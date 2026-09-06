@@ -156,12 +156,12 @@ But like any good detective, you'll learn to:
 
 - GPU programming concepts from Puzzles 1-8 (memory management, thread
   coordination, barriers)
-- **[Compatible NVIDIA GPU hardware](https://docs.modular.com/max/faq#gpu-requirements)**
+- **[Compatible NVIDIA GPU hardware](https://max.modular.com/packages/#gpu-compatibility)**
 - Environment setup with `pixi` package manager for accessing
   `compute-sanitizer`
 - **Prior puzzles**: Familiarity with
   [Puzzle 4](../puzzle_04/introduction_tile_tensor.md) and
-  [Puzzle 8](../puzzle_08/tile_tensor.md) are recommended
+  [Puzzle 8](../puzzle_08/puzzle_08.md) are recommended
 
 **What you'll gain**:
 
