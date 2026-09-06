@@ -43,7 +43,7 @@ def dot_product(
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     var local_i = thread_idx.x
 
-    if global_i < size:
+    if global_i < Int(size_dev):
         shared[local_i] = a[global_i] * b[global_i]
 
     barrier()
